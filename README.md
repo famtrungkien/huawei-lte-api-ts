@@ -284,9 +284,129 @@ report = classification_report(y_test, y_pred, target_names=['Organic', 'Recycle
 print('Classification Report:')
 print(report)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/orginil_cnn_model.PNG?token=GHSAT0AAAAAADHBSA5WSPVNCSYUOODWB5CG2DZU4LA)
+![alt text](https://i.ibb.co/mC9RDJ52/cnn-model-without-prq.png)
 
+## 1.3.  Example of PQ-CNN Model Prediction
 
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+
+model_path = '/kaggle/input/model_quantized/tensorflow2/default/1/model_cnn_quantized.tflite'
+# Load model TFLite
+def load_tflite_model(model_path):
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    return interpreter
+
+# Function to preprocess images
+def preprocess_image(image_path, input_size):
+    # Read image
+    img = cv2.imread(image_path)
+    # Convert to RGB 
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # Resize image
+    img_resized = cv2.resize(img, input_size)
+    # Normalize the image 
+    img_normalized = img_resized.astype(np.float32) / 255.0
+    # Add batch dimension
+    input_data = np.expand_dims(img_normalized, axis=0)
+    return input_data
+
+# predict function
+def predict_image(interpreter, input_data):
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # Assign data to model
+    interpreter.set_tensor(input_details[0]['index'], input_data)
+    interpreter.invoke()
+
+    # Get the prediction results
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    return output_data
+    
+def predict_fun(image_path):
+    # Load model
+    interpreter = load_tflite_model(model_path)
+
+    # Get the input dimensions of the model
+    input_details = interpreter.get_input_details()
+    input_shape = input_details[0]['shape']
+    input_size = (input_shape[1], input_shape[2])  # (width, height)
+
+    # Image preprocessing
+    input_data = preprocess_image(image_path, input_size)
+
+    # Predict
+    predictions = predict_image(interpreter, input_data)
+
+    predicted_class = np.argmax(predictions)
+    if predicted_class == 0:
+        print("The image is Organic")
+        return 'Organic Waste';
+    else:
+        print("The image is Recycle")
+        return 'Recycle Waste';
+   
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+all_time = 0
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/O/O_' + str(12568+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i != 0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+
+for i in range(6):
+    # create figure
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i != 0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### Kaggle GPU T4
+![alt text](https://i.ibb.co/WWnXXmFY/pq-cnn-predict.png)
+
+### Raspberry Pi 5
+![alt text](https://i.ibb.co/CpWVQb68/raspberrypi-pq-cnn-log.png)
 
 ## 1.4. Compare the sizes of CNN, pruned, quantized models.
 ```python
@@ -421,9 +541,135 @@ report = classification_report(y_test, y_pred, target_names=['Organic', 'Recycle
 print('Classification Report:')
 print(report)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/compare%20cnn.PNG?token=GHSAT0AAAAAADHBSA5X6KDWZPPKPOP2USIK2DZU7TA)
+![alt text](https://i.ibb.co/d06cngYh/convnext.png)
 
+## 2.2 Example of ConvneXt model Prediction
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import datasets, transforms, models
+import os
+from pathlib import Path
+from torch.utils.data import DataLoader
+import torch.nn.functional as F
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
+# Set device to CPU
+device = torch.device('cpu')
+
+model_path  = '/kaggle/input/model_convnext/tensorflow2/default/1/convnext_rac_model.pth'
+
+# Dataset path
+train_dir = "/kaggle/input/waste-classification-data/DATASET/TRAIN/"
+test_dir = "/kaggle/input/waste-classification-data/DATASET/TEST/"
+
+# Transform dataset
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
+# Create dataset
+train_dataset = datasets.ImageFolder(train_dir, transform=transform)
+test_dataset = datasets.ImageFolder(test_dir, transform=transform)
+
+# load model
+model_loaded = models.convnext_tiny(pretrained=False)
+model_loaded.classifier[2] = nn.Linear(model_loaded.classifier[2].in_features, 2)
+model_loaded.load_state_dict(torch.load(model_path, map_location='cpu'))  
+model_loaded = model_loaded.to(device)
+model_loaded.eval()
+
+# predict
+def predict_fun(image_path, model):
+    image = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])(Image.open(image_path).convert('RGB'))
+
+    image = image.unsqueeze(0).to(device)
+    with torch.no_grad():
+        output = model(image)
+        probs = F.softmax(output, dim=1)
+        pred_class = torch.argmax(probs, dim=1).item()
+        class_name = train_dataset.classes[pred_class]
+        confidence = probs[0][pred_class].item()
+    if class_name == 'R':
+        print("The image is Recycle")
+        return 'Recycle Waste'
+    if class_name == 'O':
+        print("The image is Organic")
+        return 'Organic Waste'
+   
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()
+
+all_time = 0  # Initialize timer variable
+
+for i in range(6):
+    # Sample image path
+    img_path = f'/kaggle/input/waste-classification-data/DATASET/TEST/O/O_{12568 + i}.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path, model_loaded)
+    end = time.time()
+    time_process = end - start
+    if i!=0:
+        all_time += time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()
+
+for i in range(6):
+    img_path = f'/kaggle/input/waste-classification-data/DATASET/TEST/R/R_{10000 + i}.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path, model_loaded)
+    end = time.time()
+    time_process = end - start
+    if i!=0:
+        all_time += time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### a. Kaggle
+![alt text](https://i.ibb.co/nqtRJPT1/convnext-predict.png)
+### b. Raspberrry Pi 5
+![alt text](https://i.ibb.co/hRqfQMwx/raspberrypi-convnext-log.png)
 
 # 3. VGG16 
 ## 3.1. Evaluation of VGG16 Model
@@ -495,7 +741,96 @@ report = classification_report(y_test, y_pred, target_names=['Organic', 'Recycle
 print('Classification Report:')
 print(report)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/vgg16.PNG?token=GHSAT0AAAAAADHBSA5WRTM7752KPXSHNYV42DZVAMQ)
+![alt text](https://i.ibb.co/SXqmnx9m/vgg16.png)
+## 3.2 Example of VGG16 model Prediction
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
+model = load_model('/kaggle/input/model_vgg16/tensorflow2/default/1/vgg16_O_R_classifier.keras')
+
+def predict_fun(img_path):
+    # Upload and process images
+    img = load_img(img_path, target_size=(224, 224))
+    x = img_to_array(img)
+    x = x / 255.0  # Apply the same rescale step
+    x = np.expand_dims(x, axis=0)  # Add batch size
+    
+    # Predict
+    prediction = model.predict(x)
+    
+    # Class determination based on threshold 0.5
+    if prediction[0][0] >= 0.5:
+        print("The predicted image is Recycle")
+        return 'Recycle Waste'
+    else:
+        print("The predicted image is Organic")
+        return 'Organic Waste'
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  # Convert to 1D for easier handling
+all_time = 0
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/O/O_' + str(12568+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i != 0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    #image2 = 'DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    #result = predict_image(img_path)
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  # Convert to 1D for easier handling
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i != 0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### a. Kaggle
+![alt text](https://i.ibb.co/8Q1TJ82/vgg16-predict.png)
+### b. Raspberry Pi 5
+![alt text](https://i.ibb.co/B2t0dk6S/raspberrypi-vgg.png)
 # 4. MobileNetV2
 ## 4.1. Evaluation of MobileNetV2 Model
 ```python
@@ -572,9 +907,98 @@ print('Classification Report:')
 print(report)
 ```
 
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/mobilenetv2.PNG?token=GHSAT0AAAAAADHBSA5XLCFWWOIN6D5LOWEE2DZVBBQ)
+![alt text](https://i.ibb.co/Mx0JKmX9/mobilenetv2.png)
 
+## 4.2. Example of MobileNetV2 model Prediction
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
+model = load_model('/kaggle/input/model_mobilenetv2/tensorflow2/default/1/my_model_mobilenetv2.h5')
+
+def predict_fun(img_path):
+    # Upload and process images
+    img = load_img(img_path, target_size=(224, 224))
+    x = img_to_array(img)
+    x = x / 255.0  # Apply same rescale step
+    x = np.expand_dims(x, axis=0)  # Add batch size
+    
+    # Predict
+    prediction = model.predict(x)
+    
+    # Class determination based on threshold 0.5
+    if prediction[0][0] <= 0.5:
+        print("The predicted image is Organic ")
+        return 'Organic Waste'
+    else:
+        print("The predicted image is Recycle")
+        return 'Recycle Waste'
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  # Convert to 1D for easier handling
+all_time = 0
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/O/O_' + str(12568+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i !=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    #image2 = 'DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    #result = predict_image(img_path)
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off') 
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i !=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### a. Kaggle
+![alt text](https://i.ibb.co/Qj3yRzqw/resnet-predict.png)
+### b. Raspberry Pi 5
+![alt text](https://i.ibb.co/xKxQGpvq/mobilenet-predict.png)
 # 4. ResNet
 ## 4.1. Evaluation of ResNet Model
 ```python
@@ -642,13 +1066,104 @@ print(f'Accuracy: {accuracy:.2f}')
 cm = confusion_matrix(y_test, y_pred)
 print('Confusion Matrix:')
 print(cm)
+
 # report
 report = classification_report(y_test, y_pred, target_names=['Organic', 'Recyle'])
 print('Classification Report:')
 print(report)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/resnet.PNG?token=GHSAT0AAAAAADHBSA5WAAKMMWHUTORWSJTM2DZVBWQ)
+![alt text](https://i.ibb.co/mrjWX7kD/resnet.png)
 
+## 4.2 Example of ResNet Model Prediction
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
+model = load_model('/kaggle/input/model_mobilenetv2/tensorflow2/default/1/my_model_mobilenetv2.h5')
+
+class_indices = {'organic': 0, 'recyle': 1} 
+
+# Hàm dự đoán từ một ảnh
+def predict_fun(image_path):
+    img = load_img(image_path, target_size=(224, 224))
+    img_array = img_to_array(img) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)  # tạo batch 1
+    pred = model.predict(img_array, verbose=None)[0][0]
+    class_labels = {v: k for k, v in class_indices.items()}
+
+    # Class determination based on threshold 0.5
+    if pred <= 0.5:
+        print("The predicted image is Recycle ")
+        return 'Recycle Waste'
+    else:
+        print("The predicted image is Organic")
+        return 'Organic Waste'
+        
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  # Convert to 1D for easier handling
+all_time = 0
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/O/O_' + str(12568+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i !=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    #image2 = 'DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    #result = predict_image(img_path)
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off') 
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i !=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### a. Kaggle
+![alt text](https://i.ibb.co/b50jKwvD/resnet-predict.png)
+### b. Raspberry Pi
+![alt text](https://i.ibb.co/XkrtcjPL/resnet.png)
 
 # 5. EfficientNet
 ## 5.1 Evaluation of EfficientNet Model
@@ -721,9 +1236,98 @@ report = classification_report(y_test, y_pred, target_names=['Organic', 'Recycle
 print('Classification Report:')
 print(report)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/EfficientNet.PNG?token=GHSAT0AAAAAADHBSA5WVJGFUUVFD6QIHFJC2DZVCSQ)
+![alt text](https://i.ibb.co/rfG45dg3/Efficient-Net.png)
 
+## 5.2. Example of EfficientNet Model Prediction
+```python
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import time
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
+model = load_model('/kaggle/input/model_effectlite/tensorflow2/default/1/my_model_effectlite.h5')
+
+def predict_fun(img_path):
+    # Upload and process images
+    img = load_img(img_path, target_size=(224, 224))
+    x = img_to_array(img)
+    x = x / 255.0  # Apply the same rescale step
+    x = np.expand_dims(x, axis=0)  # Add batch size
+    
+    # Predict
+    prediction = model.predict(x)
+    
+    # Class determination based on threshold 0.5
+    if prediction[0][0] >= 0.5:
+        print("The predicted image is Organic")
+        return 'Organic Waste'
+    else:
+        print("The predicted image is Recycle")
+        return 'Recycle Waste'
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+all_time = 0
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/O/O_' + str(12568+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i!=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    #image2 = 'DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    #result = predict_image(img_path)
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()  
+
+for i in range(6):
+    # Create figure to display
+    img_path = '/kaggle/input/waste-classification-data/DATASET/TEST/R/R_' + str(10000+i) + '.jpg'
+    start = time.time()
+    prediction = predict_fun(img_path)
+    end = time.time()
+    time_process = end - start
+    if i!=0:
+        all_time+= time_process
+    print(f"Time process: {time_process} s")
+    img = Image.open(img_path)
+    axes[i].imshow(img)
+    axes[i].set_title(prediction)
+    axes[i].axis('off')  
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average processing time per image: {all_time/10} s")
+```
+### a. Kaggle
+![alt text](https://i.ibb.co/Mk7g0GMF/Efficient-Net-predcit.png)
+### b. Raspberry Pi 5
+![alt text](https://i.ibb.co/ZRfvFqrL/Effect-Lite.png)
 
 # 6. Evaluation of Models.
 ## 6.1 Confusion Matrix of Models
@@ -779,7 +1383,7 @@ plt.tight_layout()
 plt.savefig('bieu_do_confusion.png')  
 plt.show()
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/bieu_do_confusion.png?token=GHSAT0AAAAAADHBSA5XW5WVG72V4HRUBRAA2DZVECA)
+![alt text](https://i.ibb.co/G3CN7J1K/bieu-do-confusion-1.png)
 
 ## 6.2. Comparison of Models
 ```python
@@ -830,7 +1434,7 @@ ket_qua = tinh_mdr_fdr(cmats)
 for res in ket_qua:
     print(f"Model {res['model_index']}: MDR = {res['MDR']:.4f}, FDR = {res['FDR']:.4f}")
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/evaluation2.PNG?token=GHSAT0AAAAAADHBSA5XL6QWC7TSUKXZFBKQ2DZVETQ)
+![alt text](https://i.ibb.co/QvzzRyJ1/evaluation2.png)
 
 ```python
 import pandas as pd
@@ -1050,7 +1654,7 @@ print(df_table1)
 print("\nTable 2 (Max size, Min accuracy, Max speed_ras, speed_kaggle, MDR, FDR")
 print(df_table2)
 ```
-![alt text](https://raw.githubusercontent.com/famtrungkien/waste-sorting/refs/heads/main/images/table.PNG?token=GHSAT0AAAAAADHBSA5XJ2VGOXJKYVL3C2KG2DZVFVA)
+![alt text](https://i.ibb.co/VYztZM6p/table.png)
 
 ## License
 
